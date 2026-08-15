@@ -3,7 +3,9 @@
 # to CPU for some ops.
 torch>=2.2
 torchaudio>=2.2
-coqui-tts>=0.24        # maintained XTTS-v2 fork (import name: TTS). NOT the archived `TTS` pkg.
-pyannote.audio>=3.1    # speaker diarization (needs a free HuggingFace token)
-soundfile>=0.12        # audio read/write
-librosa>=0.10          # audio slicing / resampling
+torchcodec            # required for audio IO on torch >= 2.9
+coqui-tts>=0.24       # maintained XTTS-v2 fork (import name: TTS). NOT the archived `TTS` pkg.
+transformers<5        # coqui-tts uses isin_mps_friendly, removed in transformers 5.x
+pyannote.audio>=3.1   # speaker diarization (needs a free HuggingFace token)
+soundfile>=0.12       # audio read/write
+librosa>=0.10         # audio slicing / resampling

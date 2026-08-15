@@ -202,34 +202,50 @@ def clean(raw: str, skip_references: bool = True, trim_frontmatter: bool = True)
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
+def _chunk_paragraph(para: str, max_chars: int) -> list[str]:
+    """Split one paragraph into TTS-sized chunks on sentence boundaries."""
+    chunks: list[str] = []
+    current = ""
+    for sent in _SENT_SPLIT.split(para):
+        sent = sent.strip()
+        if not sent:
+            continue
+        if len(sent) > max_chars:  # very long sentence: hard-wrap on words
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_hard_wrap(sent, max_chars))
+            continue
+        if len(current) + len(sent) + 1 <= max_chars:
+            current = f"{current} {sent}".strip()
+        else:
+            chunks.append(current)
+            current = sent
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def chunk(text: str, max_chars: int = 240) -> list[str]:
     """Split into TTS-sized chunks on sentence boundaries, never exceeding
-    ``max_chars`` where avoidable. Paragraphs are kept as boundaries so callers
-    can insert pauses between them."""
+    ``max_chars`` where avoidable."""
+    return chunk_with_breaks(text, max_chars)[0]
+
+
+def chunk_with_breaks(text: str, max_chars: int = 240) -> tuple[list[str], set[int]]:
+    """Like ``chunk`` but also return the indices of chunks that begin a new
+    paragraph, so callers can insert a longer pause there."""
     chunks: list[str] = []
+    breaks: set[int] = set()
     for para in text.split("\n\n"):
         para = para.strip()
         if not para:
             continue
-        current = ""
-        for sent in _SENT_SPLIT.split(para):
-            sent = sent.strip()
-            if not sent:
-                continue
-            if len(sent) > max_chars:  # very long sentence: hard-wrap on commas/space
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(_hard_wrap(sent, max_chars))
-                continue
-            if len(current) + len(sent) + 1 <= max_chars:
-                current = f"{current} {sent}".strip()
-            else:
-                chunks.append(current)
-                current = sent
-        if current:
-            chunks.append(current)
-    return chunks
+        para_chunks = _chunk_paragraph(para, max_chars)
+        if para_chunks:
+            breaks.add(len(chunks))  # first chunk of this paragraph
+            chunks.extend(para_chunks)
+    return chunks, breaks
 
 
 def _hard_wrap(sent: str, max_chars: int) -> list[str]:
