@@ -25,6 +25,8 @@ venv/
 *.ogg
 voices/*/raw/
 voices/*/reference.wav
+voices/*/samples/
+voices/*/.diarization/
 input/*
 output/*
 !**/.gitkeep

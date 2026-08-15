@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import typer
@@ -9,6 +11,19 @@ import typer
 from . import config, pdf_extract, text_clean
 
 app = typer.Typer(help="Drop a PDF in, get a cloned-voice audiobook out.", no_args_is_help=True)
+
+
+def _load_hf_token(cfg, root: Path) -> str | None:
+    """Read the Hugging Face token from the environment or the gitignored .env."""
+    key = cfg["voice_prep"].get("hf_token_env", "HF_TOKEN")
+    if os.environ.get(key):
+        return os.environ[key]
+    env_file = root / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.strip().startswith(f"{key}="):
+                return line.split("=", 1)[1].strip()
+    return None
 
 
 @app.command()
@@ -47,11 +62,69 @@ def extract(
 @app.command()
 def prep_voice(
     name: str = typer.Argument(..., help="Voice name, e.g. 'barbaro'."),
-    episodes: list[Path] = typer.Argument(..., help="Podcast audio files to source from."),
+    episodes: list[Path] = typer.Argument(..., help="Podcast audio file(s) to source from."),
+    speaker: str = typer.Option(None, "--speaker", help="Speaker label to build reference.wav from (e.g. SPEAKER_01)."),
 ):
-    """Milestone 3: build a clean reference.wav from podcast audio (manual speaker pick)."""
-    typer.echo("prep-voice is not implemented yet (milestone 3). Scaffolding is in voice_prep.py.")
-    raise typer.Exit(code=1)
+    """Build a clean reference.wav from podcast audio (manual speaker pick).
+
+    Run once with no --speaker to diarize and get per-speaker samples to listen
+    to, then re-run with --speaker LABEL to assemble the reference clip.
+    """
+    from . import voice_prep
+
+    cfg = config.load()
+    root = config.project_root()
+    vp = cfg["voice_prep"]
+
+    token = _load_hf_token(cfg, root)
+    if not token:
+        typer.echo("No Hugging Face token found. Put HF_TOKEN=hf_... in .env")
+        raise typer.Exit(code=1)
+
+    episode = episodes[0]
+    if len(episodes) > 1:
+        typer.echo(f"Note: using only the first episode for now ({episode.name}).")
+
+    voice_dir = root / cfg["paths"]["voices_dir"] / name
+    cache = voice_dir / ".diarization" / f"{episode.stem}.json"
+
+    # Diarize once, cache the turns (this is the slow step).
+    if cache.exists():
+        typer.echo(f"Using cached diarization: {cache.name}")
+        turns = [voice_prep.SpeakerTurn(**d) for d in json.loads(cache.read_text())]
+    else:
+        typer.echo(f"Diarizing {episode.name} (this takes a while)...")
+        turns = voice_prep.diarize(episode, token)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps([t.__dict__ for t in turns]))
+        typer.echo(f"Cached diarization to {cache}")
+
+    stats = voice_prep.speaker_stats(turns)
+
+    if speaker is None:
+        samples = voice_prep.export_samples(
+            episode, turns, voice_dir / "samples",
+            min_segment_secs=vp["min_segment_secs"],
+        )
+        typer.echo("\nSpeakers found (listen to the samples, then pick one):\n")
+        for label, s in stats.items():
+            sample = samples.get(label)
+            typer.echo(f"  {label:12s}  {s['seconds']/60:5.1f} min  {s['turns']:3d} turns  ->  {sample}")
+        typer.echo(f"\nListen, e.g.:  afplay \"{voice_dir/'samples'}/SPEAKER_01.wav\"")
+        typer.echo(f"Then build:    narrator prep-voice {name} \"{episode}\" --speaker SPEAKER_XX")
+        return
+
+    if speaker not in stats:
+        typer.echo(f"Speaker {speaker!r} not found. Available: {', '.join(stats)}")
+        raise typer.Exit(code=1)
+
+    secs = voice_prep.build_reference(
+        episode, turns, speaker, voice_dir / "reference.wav",
+        target_secs=vp["target_reference_secs"],
+        min_segment_secs=vp["min_segment_secs"],
+    )
+    typer.echo(f"✓ Built {voice_dir/'reference.wav'} ({secs:.0f}s of {speaker})")
+    typer.echo(f"Now narrate in this voice:  narrator narrate <pdf> --voice {name}")
 
 
 @app.command()
@@ -102,7 +175,8 @@ def narrate(
 
     # 3. synthesize per chunk, caching so re-runs skip finished audio
     backend = tts.get_backend(
-        cfg["tts"]["backend"], language=cfg["tts"]["language"], device=cfg["tts"]["device"]
+        cfg["tts"]["backend"], language=cfg["tts"]["language"], device=cfg["tts"]["device"],
+        speed=cfg["tts"].get("speed", 1.0),
     )
     cache_dir = root / cfg["paths"]["output_dir"] / ".cache" / (pdf.stem + ("-" + voice if voice else ""))
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -122,7 +196,9 @@ def narrate(
         wavs,
         out,
         paragraph_breaks=local_breaks,
+        pause_ms=cfg["chunk"].get("pause_ms", 150),
         paragraph_pause_ms=cfg["chunk"]["paragraph_pause_ms"],
+        trim_silence=cfg["chunk"].get("trim_silence", True),
     )
     typer.echo(f"✓ {len(wavs)} chunks -> {out}")
 

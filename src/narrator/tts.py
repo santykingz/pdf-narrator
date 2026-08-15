@@ -46,9 +46,10 @@ class XTTSBackend:
     MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
     DEFAULT_SPEAKER = "Ana Florence"  # a clear built-in XTTS voice
 
-    def __init__(self, language: str = "en", device: str = "auto") -> None:
+    def __init__(self, language: str = "en", device: str = "auto", speed: float = 1.0) -> None:
         self.language = language
         self.device = device
+        self.speed = speed
         self._model = None
         self._speaker = None
 
@@ -70,7 +71,10 @@ class XTTSBackend:
         model = self._load()
         out_wav = Path(out_wav)
         out_wav.parent.mkdir(parents=True, exist_ok=True)
-        kwargs = dict(text=text, language=self.language, file_path=str(out_wav), split_sentences=False)
+        kwargs = dict(
+            text=text, language=self.language, file_path=str(out_wav),
+            split_sentences=False, speed=self.speed,
+        )
         if ref_wav is not None:
             kwargs["speaker_wav"] = str(ref_wav)
         else:

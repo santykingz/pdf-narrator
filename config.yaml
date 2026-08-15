@@ -12,15 +12,18 @@ extract:
   trim_frontmatter: true    # for papers: start at Abstract/Introduction heading
 
 chunk:
-  max_chars: 240            # XTTS gets unstable on long inputs; keep chunks short
-  paragraph_pause_ms: 400   # silence inserted between paragraphs when stitching
+  max_chars: 230            # keep under XTTS's ~250-char English limit to avoid truncation
+  pause_ms: 150             # short silence between sentences/chunks
+  paragraph_pause_ms: 450   # longer silence between paragraphs
+  trim_silence: true        # trim XTTS's trailing/leading silence before adding our pauses
 
 tts:
   backend: xtts             # xtts | (future: elevenlabs)
   language: en
   device: auto              # auto | cpu | mps  (XTTS often needs cpu on M-series)
+  speed: 1.0                # 1.0 = natural pace (slowing it down sounded worse)
 
 voice_prep:
-  target_reference_secs: 60 # how much clean solo audio to gather for a voice
+  target_reference_secs: 20 # XTTS clones best from a short, clean, continuous clip
   min_segment_secs: 3.0     # ignore speaker turns shorter than this
   hf_token_env: HF_TOKEN    # env var holding your HuggingFace token for pyannote
