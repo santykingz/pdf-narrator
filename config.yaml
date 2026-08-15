@@ -9,6 +9,7 @@ extract:
   ocr_fallback: true        # OCR pages that have ~no extractable text
   ocr_min_chars: 20         # a page with fewer chars than this is treated as scanned
   skip_references: true     # drop trailing "References"/"Bibliography" sections
+  trim_frontmatter: true    # for papers: start at Abstract/Introduction heading
 
 chunk:
   max_chars: 240            # XTTS gets unstable on long inputs; keep chunks short

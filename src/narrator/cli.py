@@ -27,7 +27,11 @@ def extract(
     )
     text = "\f".join(pages)
     if not raw:
-        text = text_clean.clean(text, skip_references=cfg["extract"]["skip_references"])
+        text = text_clean.clean(
+            text,
+            skip_references=cfg["extract"]["skip_references"],
+            trim_frontmatter=cfg["extract"].get("trim_frontmatter", True),
+        )
 
     if out is None:
         out_dir = config.project_root() / cfg["paths"]["output_dir"]

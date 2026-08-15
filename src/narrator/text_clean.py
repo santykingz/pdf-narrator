@@ -12,7 +12,14 @@ from collections import Counter
 
 # A trailing reference/bibliography section reads terribly as audio.
 _REF_HEADING = re.compile(
-    r"^\s*(references|bibliography|works cited)\s*$",
+    r"^\s*(references|bibliography|works cited|literature cited)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# The start of a paper's body — everything before it (journal front-matter:
+# editors, reviewers, correspondence, submission dates) is not worth narrating.
+_BODY_START = re.compile(
+    r"^\s*(?:\d+\.?\s*)?(abstract|introduction|summary)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -69,35 +76,81 @@ def _is_noise_block(block: str) -> bool:
     return False
 
 
+# Running headers/footers are short; longer edge lines are real body text.
+_MAX_EDGE_LEN = 80
+
+
+def _norm_edge(line: str) -> str:
+    """Normalize an edge line for repeat-detection: drop digits and punctuation
+    so 'VOLUME 3 | JUNE 2005 | 475' and '... | 476' collapse to one key."""
+    return re.sub(r"[\d\W_]+", " ", line).lower().strip()
+
+
 def _strip_running_headers(pages: list[str]) -> list[str]:
     """Drop lines that repeat on many pages (running headers/footers) and bare
-    page numbers. A line appearing on >40% of pages is treated as boilerplate."""
+    page numbers. Matching ignores digits/punctuation, so footers whose only
+    difference is the page number still collapse together. A normalized edge
+    line appearing on >=40% of pages is treated as boilerplate."""
     if len(pages) < 3:
         candidates: set[str] = set()
     else:
         first_last: Counter[str] = Counter()
         for p in pages:
             lines = [ln.strip() for ln in p.splitlines() if ln.strip()]
-            # distinct lines from the top/bottom of the page — dedupe per page so
-            # short pages (where the head and tail slices overlap) don't double-count.
+            # distinct edge lines (top/bottom two), deduped per page so short
+            # pages (where head and tail slices overlap) don't double-count.
             edges = set(lines[:2]) | set(lines[-2:])
             for ln in edges:
-                first_last[ln] += 1
+                # Only short lines can be headers/footers; a long line that
+                # merely shares a numeric pattern is real body text.
+                if len(ln) > _MAX_EDGE_LEN:
+                    continue
+                key = _norm_edge(ln)
+                if key:  # ignore all-digit/punct lines here; handled below
+                    first_last[key] += 1
         threshold = max(2, int(len(pages) * 0.4))
-        candidates = {ln for ln, n in first_last.items() if n >= threshold}
+        candidates = {k for k, n in first_last.items() if n >= threshold}
 
     cleaned = []
     for p in pages:
         kept = []
         for ln in p.splitlines():
             s = ln.strip()
-            if s in candidates:
+            key = _norm_edge(s)
+            if len(s) <= _MAX_EDGE_LEN and key and key in candidates:
                 continue
             if re.fullmatch(r"[\divxlcIVXLC\-–—.\s]{1,6}", s):  # bare page numbers
                 continue
             kept.append(ln)
         cleaned.append("\n".join(kept))
     return cleaned
+
+
+def _trim_to_body(text: str) -> str:
+    """Cut journal front-matter by starting at the first Abstract/Introduction
+    heading — but only if it appears early (within the first 40% of the text),
+    so we never accidentally lop off most of a document."""
+    m = _BODY_START.search(text)
+    if m and m.start() < len(text) * 0.4:
+        return text[m.start():]
+    return text
+
+
+# Citation-marker junk: asterisk/dagger/degree clusters and superscript digits
+# that PDFs leave mashed onto words (e.g. "clones**949-°1616472,73").
+_SUPERSCRIPTS = str.maketrans("", "", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+_CITE_SYMBOLS = re.compile(r"[*†‡°]+")
+# 3+ digit run stuck directly to a word (not a spaced-out or comma'd number, so
+# real values like "8,000,000" and "3.14" are left alone).
+_CITE_DIGITS = re.compile(r"(?<=[A-Za-z?”\"'’])\d{3,}(?:[,\-–]\d+)*")
+
+
+def _strip_citation_markers(text: str) -> str:
+    text = text.translate(_SUPERSCRIPTS)
+    text = _CITE_SYMBOLS.sub("", text)
+    text = _CITE_DIGITS.sub("", text)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)  # tidy spaces left before punct
+    return text
 
 
 def _dehyphenate(text: str) -> str:
@@ -118,7 +171,7 @@ def _rewrap_paragraphs(text: str) -> str:
     return "\n\n".join(out)
 
 
-def clean(raw: str, skip_references: bool = True) -> str:
+def clean(raw: str, skip_references: bool = True, trim_frontmatter: bool = True) -> str:
     """Full clean pass on form-feed-separated page text from pdf_extract."""
     raw = _INVISIBLE.sub("", raw)
     pages = raw.split("\f")
@@ -127,14 +180,17 @@ def clean(raw: str, skip_references: bool = True) -> str:
 
     text = _dehyphenate(text)
 
-    # Cut the references section while the heading is still on its own line —
-    # rewrapping below would merge it into the following text.
+    # Drop journal front-matter and the trailing references section while their
+    # headings are still on their own lines (rewrapping below would merge them).
+    if trim_frontmatter:
+        text = _trim_to_body(text)
     if skip_references:
         m = _REF_HEADING.search(text)
         if m:
             text = text[: m.start()].rstrip()
 
     text = _rewrap_paragraphs(text)
+    text = _strip_citation_markers(text)
 
     # normalize whitespace and stray artifacts
     text = text.replace("­", "")            # soft hyphens
