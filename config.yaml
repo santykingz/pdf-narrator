@@ -1,0 +1,25 @@
+# pdf-narrator configuration
+
+paths:
+  input_dir: input
+  output_dir: output
+  voices_dir: voices
+
+extract:
+  ocr_fallback: true        # OCR pages that have ~no extractable text
+  ocr_min_chars: 20         # a page with fewer chars than this is treated as scanned
+  skip_references: true     # drop trailing "References"/"Bibliography" sections
+
+chunk:
+  max_chars: 240            # XTTS gets unstable on long inputs; keep chunks short
+  paragraph_pause_ms: 400   # silence inserted between paragraphs when stitching
+
+tts:
+  backend: xtts             # xtts | (future: elevenlabs)
+  language: en
+  device: auto              # auto | cpu | mps  (XTTS often needs cpu on M-series)
+
+voice_prep:
+  target_reference_secs: 60 # how much clean solo audio to gather for a voice
+  min_segment_secs: 3.0     # ignore speaker turns shorter than this
+  hf_token_env: HF_TOKEN    # env var holding your HuggingFace token for pyannote

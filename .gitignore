@@ -1,0 +1,28 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# macos
+.DS_Store
+
+# secrets / tokens (HuggingFace token for pyannote, etc.)
+.env
+*.token
+
+# data — don't commit audio, PDFs, or generated output
+voices/*/raw/
+voices/*/reference.wav
+voices/*/*.wav
+input/*
+output/*
+!**/.gitkeep
+
+# model caches
+*.pth
+*.ckpt
+models/

@@ -1,0 +1,7 @@
+# Milestone 1 (PDF -> clean text) + CLI/audio plumbing. Light, no ML download.
+pymupdf>=1.24        # PDF text extraction
+pytesseract>=0.3.10  # OCR fallback for scanned PDFs (needs `brew install tesseract`)
+pillow>=10.0         # rendering PDF pages to images for OCR
+pydub>=0.25          # audio stitching (needs `brew install ffmpeg`)
+typer>=0.12          # CLI
+pyyaml>=6.0          # config
