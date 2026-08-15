@@ -14,10 +14,17 @@ venv/
 .env
 *.token
 
-# data — don't commit audio, PDFs, or generated output
+# data — never commit source documents or audio, wherever they land
+*.pdf
+*.epub
+*.mp3
+*.wav
+*.m4a
+*.m4b
+*.flac
+*.ogg
 voices/*/raw/
 voices/*/reference.wav
-voices/*/*.wav
 input/*
 output/*
 !**/.gitkeep

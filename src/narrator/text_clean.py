@@ -16,6 +16,58 @@ _REF_HEADING = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Invisible characters that leak in from PDFs (BOM, zero-width space/joiners).
+_INVISIBLE = re.compile(r"[﻿​‌‍­]")
+
+# Blocks whose job is captioning/labelling, not narration. Matched at the start
+# of a block so "Table 2.1 ..." is dropped but "...as shown in Table 2.1" isn't.
+_NOISE_PREFIX = re.compile(
+    r"^(figure|fig\.|table|tbl\.|box|source|plate|scheme|appendix)\b",
+    re.IGNORECASE,
+)
+
+# Publisher / DOI / copyright boilerplate.
+_BOILERPLATE = re.compile(
+    r"(doi\.org|dx\.doi|copyright\s*©|all rights reserved|\bisbn\b|elsevier)",
+    re.IGNORECASE,
+)
+
+# A block that is just an equation number, e.g. "(2.1)".
+_EQ_NUMBER = re.compile(r"^\(?\d+(\.\d+)+\)?$")
+
+# Greek letters that show up in flattened equations (ρ, ψ, µ, β, Δ, ...).
+_GREEK = set("αβγδεζηθικλμνξοπρστυφχψωΔΣΩρψµ")
+
+
+def _is_equation(block: str) -> bool:
+    """Heuristic: a short block dense with math symbols / single-letter tokens
+    and Greek characters — i.e. a flattened equation that reads as gibberish."""
+    if _EQ_NUMBER.match(block):
+        return True
+    if len(block) > 160:
+        return False
+    has_greek = any(ch in _GREEK for ch in block)
+    has_relop = any(op in block for op in ("=", "≈", "≤", "≥", "∑", "∫"))
+    tokens = block.split()
+    if not tokens:
+        return False
+    stray = sum(1 for t in tokens if len(t.strip(".,()")) <= 2)
+    return has_greek and has_relop and stray / len(tokens) > 0.4
+
+
+def _is_noise_block(block: str) -> bool:
+    """True if a block should be dropped rather than narrated."""
+    s = block.strip()
+    if not s:
+        return True
+    if _NOISE_PREFIX.match(s):
+        return True
+    if _BOILERPLATE.search(s):
+        return True
+    if _is_equation(s):
+        return True
+    return False
+
 
 def _strip_running_headers(pages: list[str]) -> list[str]:
     """Drop lines that repeat on many pages (running headers/footers) and bare
@@ -54,19 +106,21 @@ def _dehyphenate(text: str) -> str:
 
 
 def _rewrap_paragraphs(text: str) -> str:
-    """Collapse hard-wrapped lines into paragraphs. Blank lines mark paragraph
-    breaks; single newlines inside a block become spaces."""
+    """Collapse hard-wrapped lines into paragraphs and drop non-narratable
+    blocks (captions, tables, equations, boilerplate). Blank lines mark
+    paragraph breaks; single newlines inside a block become spaces."""
     blocks = re.split(r"\n\s*\n", text)
     out = []
     for block in blocks:
         joined = re.sub(r"\s*\n\s*", " ", block).strip()
-        if joined:
+        if joined and not _is_noise_block(joined):
             out.append(joined)
     return "\n\n".join(out)
 
 
 def clean(raw: str, skip_references: bool = True) -> str:
     """Full clean pass on form-feed-separated page text from pdf_extract."""
+    raw = _INVISIBLE.sub("", raw)
     pages = raw.split("\f")
     pages = _strip_running_headers(pages)
     text = "\n\n".join(pages)
